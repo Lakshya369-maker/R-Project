@@ -1,0 +1,82 @@
+Install required libraries if not already installed
+install.packages(c("dplyr", "ggplot2", "data.table", "recommenderlab", "Matrix"))
+
+# Load necessary libraries
+library(dplyr)
+library(ggplot2)
+library(data.table)
+library(recommenderlab)
+library(Matrix)
+
+# 1. Load Data
+# Load the ratings data (user_id, movie_id, rating, timestamp)
+ratings <- read.table("ml-100k/u.data", header = FALSE, sep = "\t")
+colnames(ratings) <- c("user_id", "movie_id", "rating", "timestamp")
+
+# Load the movie metadata (movie_id, movie_title, genres)
+movies <- read.table("ml-100k/u.item", header = FALSE, sep = "|", quote = "", 
+                     col.names = c("movie_id", "movie_title", "release_date", "video_release_date", 
+                                   "IMDb_URL", "unknown", "Action", "Adventure", "Animation", 
+                                   "Children", "Comedy", "Crime", "Documentary", "Drama", 
+                                   "Fantasy", "Film_Noir", "Horror", "Musical", "Mystery", 
+                                   "Romance", "Sci_Fi", "Thriller", "War", "Western"))
+
+# 2. Merge the ratings data with movie titles
+ratings_with_titles <- merge(ratings, movies[, c("movie_id", "movie_title")], by = "movie_id")
+
+# 3. Exploratory Data Analysis (EDA)
+# Check the first few rows of the data
+head(ratings_with_titles)
+
+# Distribution of ratings
+ggplot(ratings, aes(x = rating)) + 
+  geom_bar() + 
+  labs(title = "Distribution of Ratings", x = "Rating", y = "Count")
+
+# Most rated movies
+most_rated_movies <- ratings_with_titles %>%
+  group_by(movie_title) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count)) %>%
+  head(10)
+
+print(most_rated_movies)
+
+# 4. Create a Sparse Matrix
+# Create a sparse matrix of user-movie ratings for collaborative filtering
+rating_matrix <- dcast(ratings, user_id ~ movie_id, value.var = "rating", fun.aggregate = mean)
+rating_matrix[is.na(rating_matrix)] <- 0  # Replace NA with 0 (no rating)
+
+# Convert to a sparse matrix format
+rating_matrix_sparse <- as(rating_matrix, "CsparseMatrix")
+
+# 5. Build Collaborative Filtering Model (User-Based)
+# Build the recommender model using User-based Collaborative Filtering (UBCF)
+rec_model <- Recommender(rating_matrix_sparse, method = "UBCF")
+
+# 6. Make Recommendations for a User
+# For example, recommend 5 movies for user with user_id = 10
+recommended_movies <- predict(rec_model, rating_matrix_sparse[10,], n = 5)  # Top 5 recommendations
+recommended_movies_list <- as(recommended_movies, "list")
+
+# Print the recommended movies
+print(recommended_movies_list)
+
+# 7. Model Evaluation
+# Split the data into a training and testing set
+train_data <- rating_matrix_sparse[1:800,]
+test_data <- rating_matrix_sparse[801:943,]
+
+# Re-train the model with the training data
+rec_model_train <- Recommender(train_data, method = "UBCF")
+
+# Make predictions on the test data
+predictions <- predict(rec_model_train, test_data, n = 5)
+
+# Evaluate the accuracy using RMSE (Root Mean Squared Error)
+accuracy(predictions, test_data)
+
+# 8. Visualize Movie Similarities
+# Calculate and visualize movie similarities (cosine similarity)
+movie_similarity <- sim2(rating_matrix_sparse, method = "cosine", norm = "l2")
+image(movie_similarity, main = "Movie Similarity Heatmap")
